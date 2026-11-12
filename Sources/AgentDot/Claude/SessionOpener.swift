@@ -24,16 +24,26 @@ enum SessionOpener {
     }
 
     /// From the `claude` process with a matching cwd, up to the first regular (Dock) app.
-    nonisolated private static func ownerAppPID(forCwd cwd: String) -> pid_t? {
+    nonisolated static func ownerAppPID(forCwd cwd: String) -> pid_t? {
         for pid in allPIDs() where name(of: pid) == "claude" && workingDirectory(of: pid) == cwd {
-            var current = pid
-            for _ in 0..<24 {
-                guard let parent = parentPID(of: current), parent > 1 else { break }
-                if let app = NSRunningApplication(processIdentifier: parent), app.activationPolicy == .regular {
-                    return parent
-                }
-                current = parent
+            if let app = ownerApp(of: pid, parent: parentPID(of:), isApp: { parent in
+                NSRunningApplication(processIdentifier: parent)?.activationPolicy == .regular
+            }) {
+                return app
             }
+        }
+        return nil
+    }
+
+    /// The walk itself, with the lookups passed in so it is unit-tested: up the parents of `pid`
+    /// (at most 24 steps, never to launchd) to the first regular app.
+    nonisolated static func ownerApp(of pid: pid_t, parent parentOf: (pid_t) -> pid_t?,
+                                     isApp: (pid_t) -> Bool) -> pid_t? {
+        var current = pid
+        for _ in 0..<24 {
+            guard let parent = parentOf(current), parent > 1 else { break }
+            if isApp(parent) { return parent }
+            current = parent
         }
         return nil
     }
@@ -53,11 +63,16 @@ enum SessionOpener {
         return String(decoding: bytes, as: UTF8.self)
     }
 
-    nonisolated private static func parentPID(of pid: pid_t) -> pid_t? {
-        var info = proc_bsdinfo()
-        let size = Int32(MemoryLayout<proc_bsdinfo>.size)
-        guard proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, size) == size else { return nil }
-        return pid_t(info.pbi_ppid)
+    /// The parent of any process, root-owned ones included. `proc_pidinfo(PROC_PIDTBSDINFO)`
+    /// refuses processes of other users, so the walk used to stop at `login` (root), which
+    /// Terminal runs every shell under, and "Open" fell back to the Claude app for every
+    /// Terminal session. `sysctl(KERN_PROC_PID)` answers for every process.
+    nonisolated static func parentPID(of pid: pid_t) -> pid_t? {
+        var info = kinfo_proc()
+        var size = MemoryLayout<kinfo_proc>.stride
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
+        guard sysctl(&mib, u_int(mib.count), &info, &size, nil, 0) == 0, size > 0 else { return nil }
+        return info.kp_eproc.e_ppid
     }
 
     nonisolated private static func workingDirectory(of pid: pid_t) -> String? {
