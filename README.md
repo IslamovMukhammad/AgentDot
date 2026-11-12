@@ -4,6 +4,8 @@
 
 # AgentDot
 
+[![CI](https://github.com/IslamovMukhammad/AgentDot/actions/workflows/ci.yml/badge.svg)](https://github.com/IslamovMukhammad/AgentDot/actions/workflows/ci.yml)
+
 **A menu-bar dot for your Claude Code sessions, limits and token usage.**
 
 A free, open-source macOS menu-bar app. One coloured dot tells you whether Claude Code is working, waiting for you
